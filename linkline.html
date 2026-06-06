@@ -34,6 +34,22 @@
       <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> กำลังเชื่อมต่อ LINE...
     </div>
 
+    <!-- ผูกบัญชีไว้แล้ว -->
+    <div id="ll-already" class="hidden text-center">
+      <div class="w-14 h-14 mx-auto bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-3 border border-emerald-200">
+        <i data-lucide="badge-check" class="w-7 h-7"></i>
+      </div>
+      <h2 class="text-base font-black text-slate-800 mb-1">บัญชีนี้ผูกเรียบร้อยแล้ว</h2>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-xl p-4 mt-3 text-sm leading-relaxed">
+        บัญชี LINE <b class="text-emerald-700" id="ll-already-line">-</b><br>
+        เชื่อมต่อกับข้อมูลของ<br>
+        <b class="text-emerald-700" id="ll-already-hr">-</b> แล้ว
+      </div>
+      <p class="text-[11px] text-slate-400 mt-3 flex items-center justify-center gap-1">
+        <i data-lucide="shield-check" class="w-3 h-3"></i> หากต้องการเปลี่ยนบัญชี กรุณาติดต่อผู้ดูแลระบบ
+      </p>
+    </div>
+
     <div id="ll-profile" class="hidden mb-4 flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl p-3">
       <img id="ll-avatar" class="w-10 h-10 rounded-full object-cover bg-slate-200" src="">
       <div class="text-xs">
@@ -101,7 +117,19 @@
         llDisplayName = profile.displayName;
         document.getElementById('ll-linename').textContent = llDisplayName || '-';
         if (profile.pictureUrl) document.getElementById('ll-avatar').src = profile.pictureUrl;
+
+        // 🔎 ถ้าบัญชี LINE นี้ผูกไว้แล้ว → แสดงสถานะ ไม่ให้ผูกซ้ำ/ผูกข้ามคน
+        const linked = await llCheckLinked(llLineUserId);
         loadingEl.classList.add('hidden');
+        if (linked && linked.found) {
+          const hrName = `${linked.prefix || ''}${linked.first_name || ''} ${linked.last_name || ''}`.trim();
+          document.getElementById('ll-already-line').textContent = llDisplayName || '-';
+          document.getElementById('ll-already-hr').textContent = hrName || 'ผู้ใช้ HR';
+          document.getElementById('ll-already').classList.remove('hidden');
+          llIcons();
+          return;
+        }
+
         document.getElementById('ll-profile').classList.remove('hidden');
         document.getElementById('ll-form').classList.remove('hidden');
         llIcons();
@@ -111,18 +139,43 @@
       }
     }
 
-    // ===== ดึงรายชื่อผู้ใช้มาทำ dropdown ค้นหา =====
+    // ===== ตรวจว่าบัญชี LINE นี้ผูกไว้แล้วหรือยัง =====
+    async function llCheckLinked(lineUid) {
+      try {
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/line_get_user`, {
+          method: 'POST',
+          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_line_uid: lineUid })
+        });
+        return r.ok ? await r.json() : null;
+      } catch (e) { return null; }
+    }
+
+    // ===== ดึงรายชื่อผู้ใช้มาทำ dropdown ค้นหา (ตัดคนที่ผูกแล้วออก) =====
     async function llLoadUsers() {
       try {
+        // รายชื่อ username ที่ถูกผูกกับ LINE แล้ว → ซ่อนจาก dropdown
+        let linkedSet = new Set();
+        try {
+          const lr = await fetch(`${SUPABASE_URL}/rest/v1/rpc/line_linked_usernames`, {
+            method: 'POST',
+            headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+            body: '{}'
+          });
+          if (lr.ok) { const arr = await lr.json(); if (Array.isArray(arr)) linkedSet = new Set(arr); }
+        } catch (e) {}
+
         const r = await fetch(`${SUPABASE_URL}/rest/v1/users?select=username,prefix,first_name,last_name,position&is_active=eq.true&order=first_name.asc`, {
           headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY }
         });
         const data = r.ok ? await r.json() : [];
-        llUsers = data.filter(u => u.username).map(u => ({
-          username: u.username,
-          name: `${u.prefix || ''}${u.first_name || ''} ${u.last_name || ''}`.trim(),
-          position: u.position || ''
-        }));
+        llUsers = data
+          .filter(u => u.username && !linkedSet.has(u.username))   // ตัดคนที่ผูกแล้วออก
+          .map(u => ({
+            username: u.username,
+            name: `${u.prefix || ''}${u.first_name || ''} ${u.last_name || ''}`.trim(),
+            position: u.position || ''
+          }));
       } catch (e) { llUsers = []; }
     }
 
