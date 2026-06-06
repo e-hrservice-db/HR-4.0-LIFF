@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>เข้าสู่เว็บแอป | HR-CENTER</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style> body{font-family:'IBM Plex Sans Thai','Sarabun',sans-serif;} </style>
+</head>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center p-5">
+
+  <div class="w-full max-w-sm bg-white rounded-3xl shadow-xl border border-slate-100 p-6 text-center">
+    <div class="w-14 h-14 mx-auto bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mb-3 border border-indigo-200">
+      <i data-lucide="smartphone" class="w-7 h-7"></i>
+    </div>
+    <h1 class="text-lg font-black text-slate-800">กำลังเข้าสู่เว็บแอป HR</h1>
+
+    <!-- กำลังทำงาน -->
+    <div id="ap-loading" class="py-8 text-slate-400 text-sm flex items-center justify-center gap-2">
+      <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> <span id="ap-loading-text">กำลังยืนยันตัวตน...</span>
+    </div>
+
+    <!-- ยังไม่ผูกบัญชี -->
+    <div id="ap-notlinked" class="hidden">
+      <p class="text-sm text-rose-500 font-bold mb-3 mt-2">ยังไม่ได้ผูกบัญชีกับระบบ HR</p>
+      <p class="text-xs text-slate-500 mb-4">กรุณาผูกบัญชี LINE ของคุณกับบัญชี HR ก่อนเข้าใช้งาน</p>
+      <a id="ap-linkbtn" href="#" class="inline-flex items-center gap-2 px-4 py-2.5 bg-sky-600 text-white rounded-xl text-sm font-bold">
+        <i data-lucide="link" class="w-4 h-4"></i> ไปผูกบัญชีก่อน
+      </a>
+    </div>
+
+    <!-- ผิดพลาด -->
+    <div id="ap-error" class="hidden">
+      <p id="ap-error-text" class="text-sm text-rose-500 font-bold mb-3 mt-2"></p>
+      <button onclick="apInit()" class="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-700 text-white rounded-xl text-sm font-bold">
+        <i data-lucide="refresh-cw" class="w-4 h-4"></i> ลองใหม่
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // ⚙️ LIFF app สำหรับ portal นี้ (สร้าง LIFF ใหม่ ชี้ endpoint มาที่ lineapp.html)
+    const LIFF_ID = '2010313900-p8YXXrW1';
+    // ⚙️ URL ของ Apps Script Web App (Deploy → exec URL) — หน้าเว็บมือถือ
+    const GAS_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbwx3Ef0Y09BKwP3t8wowqL8FE02BujgV-GOFgU58eHsQuBf20Db44PaDDfUL6maCP9g/exec?page=mobile';
+    // หน้าผูกบัญชี (กรณียังไม่ผูก)
+    const LINK_PAGE_URL = 'https://e-hrservice-db.github.io/HR-4.0-LIFF/linkline.html';
+
+    const SUPABASE_URL = 'https://lykcbppxbpnkipjhnqyk.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5a2NicHB4YnBua2lwamhucXlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwOTUwOTEsImV4cCI6MjA5MjY3MTA5MX0.bstoZYd8f0vC3FKnAr15S5AKuQtiT-wD019rc96e21k';
+
+    function apIcons() { if (window.lucide) lucide.createIcons(); }
+    function apShow(id) {
+      ['ap-loading', 'ap-notlinked', 'ap-error'].forEach(function (x) {
+        document.getElementById(x).classList.toggle('hidden', x !== id);
+      });
+      apIcons();
+    }
+    function apError(msg) {
+      document.getElementById('ap-error-text').textContent = msg || 'เกิดข้อผิดพลาด';
+      apShow('ap-error');
+    }
+
+    async function apInit() {
+      apShow('ap-loading');
+      document.getElementById('ap-linkbtn').href = LINK_PAGE_URL;
+      apIcons();
+
+      if (!LIFF_ID || LIFF_ID === 'PUT_APP_LIFF_ID_HERE') return apError('ยังไม่ได้ตั้งค่า LIFF_ID ในไฟล์ lineapp.html');
+      if (!GAS_WEBAPP_URL || GAS_WEBAPP_URL === 'PUT_GAS_EXEC_URL_HERE') return apError('ยังไม่ได้ตั้งค่า GAS_WEBAPP_URL ในไฟล์ lineapp.html');
+
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
+        const profile = await liff.getProfile();
+        const lineUid = profile.userId;
+
+        document.getElementById('ap-loading-text').textContent = 'กำลังเข้าสู่ระบบ...';
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/line_issue_login_token`, {
+          method: 'POST',
+          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_line_uid: lineUid })
+        });
+        const data = r.ok ? await r.json() : null;
+
+        if (!data || !data.found) { apShow('ap-notlinked'); return; }
+        if (!data.token) { apError('ออก token ไม่สำเร็จ กรุณาลองใหม่'); return; }
+
+        // redirect เข้าเว็บแอปมือถือ พร้อม one-time token → GAS แลกเป็น session อัตโนมัติ
+        const sep = GAS_WEBAPP_URL.indexOf('?') === -1 ? '?' : '&';
+        const target = `${GAS_WEBAPP_URL}${sep}page=mobile&lt=${encodeURIComponent(data.token)}`;
+        window.location.replace(target);
+      } catch (e) {
+        apError('เชื่อมต่อไม่สำเร็จ: ' + (e.message || e));
+      }
+    }
+
+    apInit();
+  </script>
+</body>
+</html>
