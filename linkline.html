@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ผูกบัญชี LINE | HR-CENTER</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <style> body{font-family:'IBM Plex Sans Thai','Sarabun',sans-serif;} </style>
+</head>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center p-5">
+
+  <div class="w-full max-w-sm bg-white rounded-3xl shadow-xl border border-slate-100 p-6">
+    <div class="text-center mb-5">
+      <div class="w-14 h-14 mx-auto bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-3 text-3xl">🔗</div>
+      <h1 class="text-lg font-black text-slate-800">ผูกบัญชี LINE กับระบบ HR</h1>
+      <p class="text-xs text-slate-500 mt-1">เข้าสู่ระบบด้วยบัญชีของท่าน เพื่อใช้งานผ่าน LINE</p>
+    </div>
+
+    <div id="ll-loading" class="text-center py-8 text-slate-400 text-sm">กำลังเชื่อมต่อ LINE...</div>
+
+    <div id="ll-profile" class="hidden mb-4 flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+      <img id="ll-avatar" class="w-10 h-10 rounded-full object-cover bg-slate-200" src="">
+      <div class="text-xs">
+        <div class="font-bold text-slate-700">บัญชี LINE: <span id="ll-linename"></span></div>
+        <div class="text-slate-400">พร้อมผูกกับบัญชี HR ของท่าน</div>
+      </div>
+    </div>
+
+    <form id="ll-form" class="hidden space-y-3" onsubmit="event.preventDefault(); llSubmit();">
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">ชื่อผู้ใช้งาน (Username)</label>
+        <input id="ll-username" type="text" autocomplete="username" required
+          class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-500">
+      </div>
+      <div>
+        <label class="block text-xs font-bold text-slate-600 mb-1">รหัสผ่าน</label>
+        <input id="ll-password" type="password" autocomplete="current-password" required
+          class="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-500">
+      </div>
+      <button type="submit" id="ll-btn"
+        class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-md">
+        เข้าสู่ระบบ & ผูกบัญชี
+      </button>
+    </form>
+
+    <p class="text-[10px] text-slate-400 text-center mt-4">ระบบจะผูกบัญชี LINE นี้กับผู้ใช้ HR ที่ท่านเข้าสู่ระบบ</p>
+  </div>
+
+  <script>
+    // ⚙️ แก้ค่า LIFF_ID ให้ตรงกับ LIFF app ของท่าน (จาก LINE Developers)
+    const LIFF_ID = 'PUT_YOUR_LIFF_ID_HERE';
+
+    const SUPABASE_URL = 'https://lykcbppxbpnkipjhnqyk.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5a2NicHB4YnBua2lwamhucXlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwOTUwOTEsImV4cCI6MjA5MjY3MTA5MX0.bstoZYd8f0vC3FKnAr15S5AKuQtiT-wD019rc96e21k';
+
+    let llLineUserId = null, llDisplayName = null;
+
+    async function llInit() {
+      const loadingEl = document.getElementById('ll-loading');
+      if (!LIFF_ID || LIFF_ID === 'PUT_YOUR_LIFF_ID_HERE') {
+        loadingEl.textContent = 'ยังไม่ได้ตั้งค่า LIFF_ID ในไฟล์ linkline.html';
+        return;
+      }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
+        const profile = await liff.getProfile();
+        llLineUserId = profile.userId;
+        llDisplayName = profile.displayName;
+        document.getElementById('ll-linename').textContent = llDisplayName || '-';
+        if (profile.pictureUrl) document.getElementById('ll-avatar').src = profile.pictureUrl;
+        loadingEl.classList.add('hidden');
+        document.getElementById('ll-profile').classList.remove('hidden');
+        document.getElementById('ll-form').classList.remove('hidden');
+      } catch (e) {
+        loadingEl.textContent = 'เชื่อมต่อ LINE ไม่สำเร็จ: ' + (e.message || e);
+      }
+    }
+
+    async function llSubmit() {
+      const username = document.getElementById('ll-username').value.trim();
+      const password = document.getElementById('ll-password').value;
+      if (!username || !password) return;
+      if (!llLineUserId) return Swal.fire('ผิดพลาด', 'ไม่พบ LINE userId กรุณาเปิดผ่านแอป LINE', 'error');
+
+      const btn = document.getElementById('ll-btn'); btn.disabled = true; btn.textContent = 'กำลังผูกบัญชี...';
+      try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/link_line_account`, {
+          method: 'POST',
+          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_username: username, p_password: password, p_line_uid: llLineUserId, p_display: llDisplayName })
+        });
+        const data = await res.json();
+        btn.disabled = false; btn.textContent = 'เข้าสู่ระบบ & ผูกบัญชี';
+        if (res.ok && data && data.success) {
+          Swal.fire({ icon: 'success', title: 'ผูกบัญชีสำเร็จ', html: 'ยินดีต้อนรับ <b>' + (data.name || '') + '</b><br>ท่านสามารถใช้งานผ่าน LINE ได้แล้ว', confirmButtonText: 'เสร็จสิ้น' })
+            .then(function () { if (liff.isInClient()) liff.closeWindow(); });
+        } else {
+          Swal.fire('ไม่สำเร็จ', (data && data.message) || 'ผูกบัญชีไม่สำเร็จ', 'error');
+        }
+      } catch (e) {
+        btn.disabled = false; btn.textContent = 'เข้าสู่ระบบ & ผูกบัญชี';
+        Swal.fire('ผิดพลาด', e.message || 'เชื่อมต่อไม่สำเร็จ', 'error');
+      }
+    }
+
+    llInit();
+  </script>
+</body>
+</html>
