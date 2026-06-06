@@ -90,7 +90,15 @@
 
         // redirect เข้าเว็บแอปมือถือ พร้อม one-time token → GAS แลกเป็น session อัตโนมัติ
         const sep = GAS_WEBAPP_URL.indexOf('?') === -1 ? '?' : '&';
-        const target = `${GAS_WEBAPP_URL}${sep}page=mobile&lt=${encodeURIComponent(data.token)}`;
+        let target = `${GAS_WEBAPP_URL}${sep}page=mobile&lt=${encodeURIComponent(data.token)}`;
+        // deep-link: ส่งหน้าปลายทางต่อ (เช่น ?go=view-leave จาก Flex ขอลางาน)
+        const qs = new URLSearchParams(location.search);
+        let go = (qs.get('go') || '').trim();
+        // เผื่อ LIFF ห่อ query ไว้ใน liff.state (บางเวอร์ชัน)
+        if (!go && qs.get('liff.state')) {
+          try { go = (new URLSearchParams(decodeURIComponent(qs.get('liff.state')).replace(/^\?/, '')).get('go') || '').trim(); } catch (e) {}
+        }
+        if (/^[A-Za-z0-9_\-]{1,40}$/.test(go)) target += `&go=${encodeURIComponent(go)}`;
         window.location.replace(target);
       } catch (e) {
         apError('เชื่อมต่อไม่สำเร็จ: ' + (e.message || e));
