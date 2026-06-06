@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>สแกนลงเวลา GPS | HR-CENTER</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style> body{font-family:'IBM Plex Sans Thai','Sarabun',sans-serif;} </style>
+</head>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center p-5">
+
+  <div class="w-full max-w-sm bg-white rounded-3xl shadow-xl border border-slate-100 p-6">
+    <div class="text-center mb-5">
+      <div class="w-14 h-14 mx-auto bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-3 border border-emerald-200">
+        <i data-lucide="map-pin" class="w-7 h-7"></i>
+      </div>
+      <h1 class="text-lg font-black text-slate-800">สแกนลงเวลาด้วย GPS</h1>
+      <p class="text-xs text-slate-500 mt-1">ระบบจะใช้ตำแหน่งจริงของอุปกรณ์ ณ ปัจจุบัน</p>
+    </div>
+
+    <!-- หมายเหตุความปลอดภัย -->
+    <div class="mb-4 bg-amber-50 border border-amber-100 rounded-xl p-3 flex items-start gap-2.5">
+      <i data-lucide="shield-check" class="w-4 h-4 text-amber-500 shrink-0 mt-0.5"></i>
+      <p class="text-[11px] text-slate-600 leading-relaxed">
+        เพื่อความถูกต้อง ระบบจะอ่าน <b class="text-amber-700">ตำแหน่ง GPS จริง</b> ของเครื่อง
+        (ไม่ใช่หมุดที่เลือกเอง) — กรุณาเปิด GPS และอนุญาตการเข้าถึงตำแหน่ง แล้วทำการลงเวลาภายในบริเวณโรงเรียน
+      </p>
+    </div>
+
+    <div id="ls-loading" class="text-center py-8 text-slate-400 text-sm flex items-center justify-center gap-2">
+      <i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> กำลังเชื่อมต่อ LINE...
+    </div>
+
+    <!-- โปรไฟล์ผู้ใช้ HR -->
+    <div id="ls-profile" class="hidden mb-4 flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+      <div class="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center shrink-0">
+        <i data-lucide="user-check" class="w-5 h-5"></i>
+      </div>
+      <div class="text-xs">
+        <div class="font-bold text-slate-700" id="ls-name">-</div>
+        <div class="text-slate-400" id="ls-pos">พร้อมลงเวลา</div>
+      </div>
+    </div>
+
+    <!-- ปุ่มลงเวลา -->
+    <button id="ls-btn" class="hidden w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-md flex items-center justify-center gap-2"
+      onclick="lsScan()">
+      <i data-lucide="navigation" class="w-4 h-4"></i> ดึงตำแหน่ง & ลงเวลา
+    </button>
+
+    <!-- ยังไม่ผูกบัญชี -->
+    <div id="ls-notlinked" class="hidden text-center">
+      <p class="text-sm text-rose-500 font-bold mb-3">ยังไม่ได้ผูกบัญชีกับระบบ HR</p>
+      <a id="ls-linkbtn" href="#" class="inline-flex items-center gap-2 px-4 py-2.5 bg-sky-600 text-white rounded-xl text-sm font-bold">
+        <i data-lucide="link" class="w-4 h-4"></i> ไปผูกบัญชีก่อน
+      </a>
+    </div>
+
+    <div id="ls-status" class="hidden mt-4 text-center text-xs text-slate-500"></div>
+
+    <p class="text-[10px] text-slate-400 text-center mt-4 flex items-center justify-center gap-1">
+      <i data-lucide="satellite" class="w-3 h-3"></i> ตรวจสอบพิกัดภายในบริเวณโรงเรียนเท่านั้น
+    </p>
+  </div>
+
+  <script>
+    // ⚙️ LIFF app สำหรับหน้าสแกน (สร้าง LIFF ใหม่ ชี้ endpoint มาที่ linescan.html)
+    const LIFF_ID = 'PUT_SCAN_LIFF_ID_HERE';
+    // ลิงก์หน้าผูกบัญชี (กรณียังไม่ผูก)
+    const LINK_PAGE_URL = 'https://e-hrservice-db.github.io/HR-4-FS/linkline.html';
+
+    const SUPABASE_URL = 'https://lykcbppxbpnkipjhnqyk.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx5a2NicHB4YnBua2lwamhucXlrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcwOTUwOTEsImV4cCI6MjA5MjY3MTA5MX0.bstoZYd8f0vC3FKnAr15S5AKuQtiT-wD019rc96e21k';
+
+    // ขอบเขตโรงเรียน (19 จุด) — ตรงกับ m_FaceScanInApp / Code.js
+    const SCHOOL_POLYGON = [
+      [12.785238898383794,99.91365373134613],[12.78599745238914,99.91338819265366],[12.785939906992754,99.91311192512512],
+      [12.786957412294308,99.91276323795319],[12.786894635736306,99.91252452135086],[12.787373306596795,99.9123340845108],
+      [12.78749362809111,99.91252183914185],[12.788314951542185,99.91226702928543],[12.7884588136551,99.91263717412949],
+      [12.786667070582686,99.9133238196373],[12.786936486776709,99.91428673267365],[12.783787176605763,99.91540253162384],
+      [12.783400049388725,99.91421163082123],[12.784216154720637,99.91395145654678],[12.784025207235116,99.9134686589241],
+      [12.783999050034073,99.91337478160858],[12.783821180995126,99.91340696811676],[12.783758403657343,99.91309851408005],
+      [12.78491193474759,99.91268545389175]
+    ];
+    function pointInPolygon(lat, lng, vs) {
+      let inside = false;
+      for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        const xi = vs[i][0], yi = vs[i][1], xj = vs[j][0], yj = vs[j][1];
+        const intersect = ((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+
+    let lsUser = null;          // { id, face_scan_id, name, position }
+    let lsBusy = false;
+    function lsIcons() { if (window.lucide) lucide.createIcons(); }
+    const headers = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' };
+
+    async function lsInit() {
+      const loadingEl = document.getElementById('ls-loading');
+      lsIcons();
+      document.getElementById('ls-linkbtn').href = LINK_PAGE_URL;
+      if (!LIFF_ID || LIFF_ID === 'PUT_SCAN_LIFF_ID_HERE') {
+        loadingEl.textContent = 'ยังไม่ได้ตั้งค่า LIFF_ID ในไฟล์ linescan.html';
+        return;
+      }
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
+        const profile = await liff.getProfile();
+        const lineUid = profile.userId;
+
+        // แปลง LINE uid → ผู้ใช้ HR
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/line_get_user`, {
+          method: 'POST', headers, body: JSON.stringify({ p_line_uid: lineUid })
+        });
+        const data = r.ok ? await r.json() : null;
+        loadingEl.classList.add('hidden');
+
+        if (!data || !data.found) {
+          document.getElementById('ls-notlinked').classList.remove('hidden');
+          lsIcons();
+          return;
+        }
+        lsUser = {
+          id: data.id,
+          face_scan_id: data.face_scan_id,
+          name: `${data.prefix || ''}${data.first_name || ''} ${data.last_name || ''}`.trim(),
+          position: data.position || ''
+        };
+        document.getElementById('ls-name').textContent = lsUser.name || '-';
+        document.getElementById('ls-pos').textContent = lsUser.position || 'พร้อมลงเวลา';
+        document.getElementById('ls-profile').classList.remove('hidden');
+        document.getElementById('ls-btn').classList.remove('hidden');
+        lsIcons();
+      } catch (e) {
+        loadingEl.textContent = 'เชื่อมต่อ LINE ไม่สำเร็จ: ' + (e.message || e);
+      }
+    }
+
+    function lsSetStatus(msg) {
+      const el = document.getElementById('ls-status');
+      el.textContent = msg; el.classList.remove('hidden');
+    }
+
+    function lsScan() {
+      if (lsBusy || !lsUser) return;
+      if (!navigator.geolocation) return Swal.fire('ไม่รองรับ', 'อุปกรณ์ไม่รองรับการอ่าน GPS', 'error');
+      lsBusy = true;
+      const btn = document.getElementById('ls-btn');
+      btn.disabled = true; btn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i> กำลังอ่านตำแหน่ง...'; lsIcons();
+      lsSetStatus('กำลังระบุพิกัด GPS...');
+
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          const lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy;
+          lsSetStatus(`ความแม่นยำ ±${Math.round(acc)} ม.`);
+          if (acc && acc > 500) {
+            lsResetBtn(); Swal.fire('สัญญาณ GPS อ่อน', 'ความแม่นยำต่ำเกินไป (±' + Math.round(acc) + ' ม.) กรุณาออกที่โล่ง/เปิด GPS แล้วลองใหม่', 'warning'); return;
+          }
+          if (!pointInPolygon(lat, lng, SCHOOL_POLYGON)) {
+            lsResetBtn();
+            Swal.fire({ icon: 'error', title: 'อยู่นอกพื้นที่โรงเรียน', text: 'ไม่สามารถลงเวลาได้ กรุณาลงเวลาภายในบริเวณโรงเรียน' });
+            return;
+          }
+          lsRecord(lat, lng);
+        },
+        function (err) {
+          lsResetBtn();
+          let m = 'ไม่สามารถอ่านตำแหน่งได้';
+          if (err.code === 1) m = 'กรุณาอนุญาตการเข้าถึงตำแหน่ง (Location) แล้วลองใหม่';
+          else if (err.code === 3) m = 'หมดเวลาอ่านตำแหน่ง กรุณาลองใหม่';
+          Swal.fire('อ่าน GPS ไม่สำเร็จ', m, 'error');
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+      );
+    }
+
+    function lsResetBtn() {
+      lsBusy = false;
+      const btn = document.getElementById('ls-btn');
+      btn.disabled = false; btn.innerHTML = '<i data-lucide="navigation" class="w-4 h-4"></i> ดึงตำแหน่ง & ลงเวลา'; lsIcons();
+    }
+
+    // ===== บันทึกลงเวลา (พอร์ตจาก m_FaceScanInApp.recordInAppAttendance) =====
+    async function lsRecord(lat, lng) {
+      lsSetStatus('กำลังประมวลผลเวลาทำงาน...');
+      try {
+        const now = new Date();
+        const localNow = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+        const scanDate = localNow.toISOString().split('T')[0];
+        const scanTime = localNow.toISOString().split('T')[1].substring(0, 8);
+
+        const isGuard = lsUser.face_scan_id && String(lsUser.face_scan_id).startsWith('9');
+        let scanAction = 'none';
+        if (isGuard) scanAction = 'any';
+        else if (scanTime >= '04:00:00' && scanTime <= '14:00:00') scanAction = 'in';
+        else if (scanTime >= '14:00:01' && scanTime <= '23:59:59') scanAction = 'out';
+        else {
+          lsResetBtn();
+          Swal.fire({ icon: 'warning', title: 'นอกช่วงเวลา', text: 'อนุญาตให้ลงเวลาได้ช่วง 04:00–14:00 (เข้า) และ 14:01–23:59 (ออก) เท่านั้น' });
+          return;
+        }
+
+        const [rawDaily, rawRef, rawRound, rawHol, rawDormHol, rawSpecial] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/daily_attendance_records?user_id=eq.${lsUser.id}&attendance_date=eq.${scanDate}`, { headers }),
+          fetch(`${SUPABASE_URL}/rest/v1/dbprocessattendance?user_id=eq.${lsUser.id}&attendance_date=eq.${scanDate}`, { headers }),
+          fetch(`${SUPABASE_URL}/rest/v1/attendance_round_settings?start_date=lte.${scanDate}&end_date=gte.${scanDate}`, { headers }),
+          fetch(`${SUPABASE_URL}/rest/v1/holidays?start_date=lte.${scanDate}&end_date=gte.${scanDate}`, { headers }),
+          fetch(`${SUPABASE_URL}/rest/v1/dorm_holidays?user_id=eq.${lsUser.id}&holiday_date=eq.${scanDate}`, { headers }),
+          fetch(`${SUPABASE_URL}/rest/v1/special_work_periods?start_date=lte.${scanDate}&end_date=gte.${scanDate}`, { headers })
+        ]);
+        const [dailyRecs, refLeaves, roundSets, holidays, dormHols, specialPeriods] = await Promise.all([
+          rawDaily.ok ? rawDaily.json() : [], rawRef.ok ? rawRef.json() : [],
+          rawRound.ok ? rawRound.json() : [], rawHol.ok ? rawHol.json() : [],
+          rawDormHol.ok ? rawDormHol.json() : [], rawSpecial.ok ? rawSpecial.json() : []
+        ]);
+
+        const refData = refLeaves.length > 0 ? refLeaves[0] : null;
+        const dailyData = dailyRecs.length > 0 ? dailyRecs[0] : null;
+        const defaultLate = roundSets.length > 0 ? (roundSets[0].late_time || '08:00:00') : '08:00:00';
+        const defaultOff = roundSets.length > 0 ? (roundSets[0].off_work_time || '16:30:00') : '16:30:00';
+        const sp = specialPeriods.length > 0 ? specialPeriods[0] : null;
+        const LATE_TIME = sp ? sp.late_time : defaultLate;
+        const OFF_WORK_TIME = sp ? sp.off_work_time : defaultOff;
+
+        const dObj = new Date(scanDate + "T00:00:00");
+        const isPublicHol = (dObj.getDay() === 0 || dObj.getDay() === 6) || holidays.length > 0;
+        const isDormHol = dormHols.length > 0;
+        const isAnyHoliday = isPublicHol || isDormHol;
+        const holidayRemarkText = isDormHol && !isPublicHol ? 'วันหยุดครูหอพัก' : 'วันหยุด';
+
+        let timeIn = dailyData ? dailyData.time_in : null;
+        let timeOut = dailyData ? dailyData.time_out : null;
+
+        if (isGuard) {
+          if (!timeIn) { timeIn = scanTime; timeOut = scanTime; }
+          else { timeIn = timeIn < scanTime ? timeIn : scanTime; timeOut = timeOut > scanTime ? timeOut : scanTime; }
+        } else {
+          if (scanAction === 'in') { timeIn = timeIn ? (timeIn < scanTime ? timeIn : scanTime) : scanTime; }
+          else if (scanAction === 'out') { timeOut = timeOut ? (timeOut > scanTime ? timeOut : scanTime) : scanTime; if (!timeIn) timeIn = scanTime; }
+        }
+
+        const tInShort = timeIn ? timeIn.substring(0, 5) : '-';
+        const tOutShort = timeOut ? timeOut.substring(0, 5) : '-';
+
+        let recordType = isAnyHoliday ? 'holiday' : 'present';
+        let subType = 'no_data';
+        let remark = '-';
+
+        const isLate = timeIn > LATE_TIME;
+        const isLeaveEarly = (timeOut < OFF_WORK_TIME) && (timeIn !== timeOut);
+        const isSingleScan = (timeIn === timeOut || !timeOut);
+
+        if (refData) {
+          if (refData.record_type === 'out') {
+            recordType = 'present';
+            if (isLate) { subType = 'late'; remark = `ออกนอกสถานศึกษา (มาสาย ${tInShort})`; }
+            else { subType = 'normal'; remark = `มาทำงานปกติ (ออกนอกฯ)`; }
+          } else { recordType = refData.record_type; subType = refData.sub_type || 'normal'; remark = refData.remark || 'มีเอกสารอ้างอิง'; }
+        } else {
+          if (isAnyHoliday) { subType = 'work_on_holiday'; remark = `มาทำวันหยุด (${holidayRemarkText})`; }
+          else if (isSingleScan && scanAction === 'in') { subType = isLate ? 'late' : 'normal'; remark = isLate ? `มาสาย (เข้า: ${tInShort})` : `มาทำงานปกติ (เข้า: ${tInShort})`; }
+          else if (isLate && isLeaveEarly) { subType = 'late_and_early'; remark = `เข้า: ${tInShort} | ออก: ${tOutShort}`; }
+          else if (isLate) { subType = 'late'; remark = `เข้า: ${tInShort} | ออก: ${tOutShort}`; }
+          else if (isLeaveEarly) { subType = 'leave_early'; remark = `เข้า: ${tInShort} | ออก: ${tOutShort}`; }
+          else { subType = 'normal'; remark = `เข้า: ${tInShort} | ออก: ${tOutShort}`; }
+        }
+
+        if (isGuard && isSingleScan) { recordType = 'present'; subType = 'evening_shift'; remark = `เข้างานช่วงเย็น [เวลา: ${tInShort}]`; }
+
+        const payloadLog = {
+          machine_id: 'LINE_GPS', face_scan_id: lsUser.face_scan_id,
+          scan_date: scanDate, scan_time: scanTime,
+          original_log: `LINE GPS Match (${scanAction})`, status: 'processed'
+        };
+        const payloadDaily = {
+          user_id: lsUser.id, attendance_date: scanDate,
+          time_in: timeIn, time_out: timeOut,
+          record_type: recordType, sub_type: subType, remark: remark
+        };
+        const urlDaily = dailyData ? `${SUPABASE_URL}/rest/v1/daily_attendance_records?id=eq.${dailyData.id}` : `${SUPABASE_URL}/rest/v1/daily_attendance_records`;
+
+        const [logRes, dailyRes] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/raw_attendance_logs`, { method: 'POST', headers, body: JSON.stringify(payloadLog) }),
+          fetch(urlDaily, { method: dailyData ? 'PATCH' : 'POST', headers, body: JSON.stringify(payloadDaily) })
+        ]);
+        if (!dailyRes.ok) throw new Error('บันทึกข้อมูลไม่สำเร็จ (' + dailyRes.status + ')');
+
+        const alertIcon = subType.includes('late') ? 'warning' : 'success';
+        Swal.fire({
+          icon: alertIcon, title: 'ลงเวลาสำเร็จ',
+          html: `<b>${lsUser.name}</b><br>${remark}`,
+          confirmButtonText: 'เสร็จสิ้น', confirmButtonColor: '#10b981'
+        }).then(() => { if (liff.isInClient()) liff.closeWindow(); });
+
+      } catch (e) {
+        lsResetBtn();
+        Swal.fire({ icon: 'error', title: 'บันทึกล้มเหลว', text: e.message || 'ไม่สามารถบันทึกข้อมูลได้' });
+      }
+    }
+
+    lsInit();
+  </script>
+</body>
+</html>
