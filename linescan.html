@@ -96,9 +96,39 @@
     }
 
     let lsUser = null;          // { id, face_scan_id, name, position }
+    let lsLineUid = null;
     let lsBusy = false;
     function lsIcons() { if (window.lucide) lucide.createIcons(); }
     const headers = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': 'Bearer ' + SUPABASE_ANON_KEY, 'Content-Type': 'application/json' };
+
+    // ===== ตรวจสอบ / ป้องปราม Fake GPS: เก็บ log พิกัด + IP ทุกครั้ง (รวมที่ถูกปฏิเสธ) =====
+    let lsIpInfo = null;
+    async function lsGetIp() {
+      if (lsIpInfo) return lsIpInfo;
+      try {
+        const r = await fetch('https://ipapi.co/json/');
+        if (r.ok) { const j = await r.json(); lsIpInfo = { ip: j.ip || null, country: j.country_name || j.country || null, region: j.region || null }; return lsIpInfo; }
+      } catch (e) {}
+      try { const r2 = await fetch('https://api.ipify.org?format=json'); if (r2.ok) { const j2 = await r2.json(); lsIpInfo = { ip: j2.ip || null, country: null, region: null }; return lsIpInfo; } } catch (e) {}
+      lsIpInfo = { ip: null, country: null, region: null };
+      return lsIpInfo;
+    }
+    async function lsAudit(lat, lng, acc, alt, spd, inPoly, result) {
+      try {
+        const ipi = await lsGetIp();
+        await fetch(`${SUPABASE_URL}/rest/v1/rpc/line_log_scan`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            p_line_uid: lsLineUid,
+            p_lat: lat, p_lng: lng, p_accuracy: acc,
+            p_altitude: (alt == null ? null : alt), p_speed: (spd == null ? null : spd),
+            p_in_polygon: !!inPoly, p_result: result,
+            p_public_ip: ipi.ip, p_ip_country: ipi.country, p_ip_region: ipi.region,
+            p_user_agent: navigator.userAgent
+          })
+        });
+      } catch (e) { /* best-effort ไม่บล็อกผู้ใช้ */ }
+    }
 
     async function lsInit() {
       const loadingEl = document.getElementById('ls-loading');
@@ -113,6 +143,7 @@
         if (!liff.isLoggedIn()) { liff.login({ redirectUri: window.location.href }); return; }
         const profile = await liff.getProfile();
         const lineUid = profile.userId;
+        lsLineUid = lineUid;
 
         // แปลง LINE uid → ผู้ใช้ HR
         const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/line_get_user`, {
@@ -158,15 +189,20 @@
       navigator.geolocation.getCurrentPosition(
         function (pos) {
           const lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy;
+          const alt = pos.coords.altitude, spd = pos.coords.speed;
           lsSetStatus(`ความแม่นยำ ±${Math.round(acc)} ม.`);
+          const inPoly = pointInPolygon(lat, lng, SCHOOL_POLYGON);
           if (acc && acc > 500) {
+            lsAudit(lat, lng, acc, alt, spd, inPoly, 'low_accuracy');
             lsResetBtn(); Swal.fire('สัญญาณ GPS อ่อน', 'ความแม่นยำต่ำเกินไป (±' + Math.round(acc) + ' ม.) กรุณาออกที่โล่ง/เปิด GPS แล้วลองใหม่', 'warning'); return;
           }
-          if (!pointInPolygon(lat, lng, SCHOOL_POLYGON)) {
+          if (!inPoly) {
+            lsAudit(lat, lng, acc, alt, spd, false, 'outside_area');
             lsResetBtn();
             Swal.fire({ icon: 'error', title: 'อยู่นอกพื้นที่โรงเรียน', text: 'ไม่สามารถลงเวลาได้ กรุณาลงเวลาภายในบริเวณโรงเรียน' });
             return;
           }
+          lsAudit(lat, lng, acc, alt, spd, true, 'success');
           lsRecord(lat, lng);
         },
         function (err) {
